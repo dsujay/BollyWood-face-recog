@@ -3,34 +3,18 @@ from keras_vggface.vggface import VGGFace
 
 import numpy as np
 import pickle
+import cv2
 
 from sklearn.metrics.pairwise import cosine_similarity
-
-import cv2
 from mtcnn import MTCNN
-from PIL import Image
 
 
-# ---------------------------------------------------
-# 1. Load stored embeddings and filenames
-# ---------------------------------------------------
-
-feature_list = np.array(
-    pickle.load(open('embedding.pkl', 'rb'))
-)
-
-filenames = pickle.load(
-    open('filenames.pkl', 'rb')
-)
-
-print("Number of stored embeddings:", len(feature_list))
-print("Number of filenames:", len(filenames))
+# Load stored embeddings and filenames
+feature_list = np.array(pickle.load(open('embedding.pkl', 'rb')))
+filenames = pickle.load(open('filenames.pkl', 'rb'))
 
 
-# ---------------------------------------------------
-# 2. Load VGGFace model
-# ---------------------------------------------------
-
+# Load VGGFace model
 model = VGGFace(
     model='resnet50',
     include_top=False,
@@ -39,184 +23,76 @@ model = VGGFace(
 )
 
 
-# ---------------------------------------------------
-# 3. Create MTCNN detector
-# ---------------------------------------------------
-
+# Create face detector
 detector = MTCNN()
 
 
-# ---------------------------------------------------
-# 4. Load query image
-# ---------------------------------------------------
-
+# Load query image
 sample_img = cv2.imread('sample/ronit.png')
 
-if sample_img is None:
-    print("Image could not be loaded.")
-    exit()
+# Convert BGR to RGB
+sample_img_rgb = cv2.cvtColor(sample_img, cv2.COLOR_BGR2RGB)
 
 
-# ---------------------------------------------------
-# 5. Convert BGR -> RGB
-# ---------------------------------------------------
-
-sample_img_rgb = cv2.cvtColor(
-    sample_img,
-    cv2.COLOR_BGR2RGB
-)
-
-
-# ---------------------------------------------------
-# 6. Detect face
-# ---------------------------------------------------
-
+# Detect face
 results = detector.detect_faces(sample_img_rgb)
-
-print("Number of faces detected:", len(results))
 
 if len(results) == 0:
     print("No face detected.")
     exit()
 
 
-# ---------------------------------------------------
-# 7. Get the first detected face
-# ---------------------------------------------------
-
+# Get first detected face
 x, y, width, height = results[0]['box']
 
-# MTCNN can sometimes return negative x/y values
 x = max(0, x)
 y = max(0, y)
 
-# Make sure width and height are valid
-width = max(1, width)
-height = max(1, height)
+face = sample_img_rgb[y:y+height, x:x+width]
 
 
-# ---------------------------------------------------
-# 8. Crop face
-# ---------------------------------------------------
+# Resize face
+face = cv2.resize(face, (224, 224))
 
-face = sample_img_rgb[
-    y:y + height,
-    x:x + width
-]
+# Convert to float32
+face = face.astype('float32')
 
 
-# ---------------------------------------------------
-# 9. Show detected face
-# ---------------------------------------------------
-
-cv2.imshow(
-    'Detected Face',
-    cv2.cvtColor(face, cv2.COLOR_RGB2BGR)
-)
-
-cv2.waitKey(0)
-cv2.destroyAllWindows()
+# Add batch dimension
+face = np.expand_dims(face, axis=0)
 
 
-# ---------------------------------------------------
-# 10. Resize face to 224x224
-# ---------------------------------------------------
-
-image = Image.fromarray(face)
-
-image = image.resize((224, 224))
+# Preprocess image
+face = preprocess_input(face)
 
 
-# ---------------------------------------------------
-# 11. Convert image to NumPy array
-# ---------------------------------------------------
-
-face_array = np.asarray(image)
-
-face_array = face_array.astype('float32')
+# Generate face embedding
+result = model.predict(face).flatten()
 
 
-print("Face array shape:", face_array.shape)
-
-
-# ---------------------------------------------------
-# 12. Add batch dimension
-# ---------------------------------------------------
-
-expanded_img = np.expand_dims(
-    face_array,
-    axis=0
-)
-
-print("Expanded image shape:", expanded_img.shape)
-
-
-# ---------------------------------------------------
-# 13. VGGFace preprocessing
-# ---------------------------------------------------
-
-preprocessed_img = preprocess_input(
-    expanded_img
-)
-
-
-# ---------------------------------------------------
-# 14. Generate embedding
-# ---------------------------------------------------
-
-result = model.predict(
-    preprocessed_img
-).flatten()
-
-print("Query embedding shape:", result.shape)
-
-
-# ---------------------------------------------------
-# 15. Compare with stored embeddings
-# ---------------------------------------------------
-
+# Compare with stored embeddings
 similarity = []
 
-for i in range(len(feature_list)):
+for feature in feature_list:
 
     score = cosine_similarity(
         result.reshape(1, -1),
-        feature_list[i].reshape(1, -1)
+        feature.reshape(1, -1)
     )[0][0]
 
     similarity.append(score)
 
 
-# ---------------------------------------------------
-# 16. Find highest similarity
-# ---------------------------------------------------
-
+# Find best match
 index_pos = np.argmax(similarity)
 
-best_similarity = similarity[index_pos]
-
-print("Best similarity:", best_similarity)
-
+print("Similarity:", similarity[index_pos])
 print("Matched file:", filenames[index_pos])
 
 
-# ---------------------------------------------------
-# 17. Load matched image
-# ---------------------------------------------------
+# Display matched image
+matched_image = cv2.imread(filenames[index_pos])
 
-temp_img = cv2.imread(
-    filenames[index_pos]
-)
-
-
-# ---------------------------------------------------
-# 18. Show result
-# ---------------------------------------------------
-
-cv2.imshow(
-    'Output',
-    temp_img
-)
-
+cv2.imshow("Matched Celebrity", matched_image)
 cv2.waitKey(0)
 cv2.destroyAllWindows()
